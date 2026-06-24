@@ -27,20 +27,17 @@ impl Solver {
 
                 let center = field.current[idx];
 
-                let laplacian =
-                    field.current[field.idx(x - 1, y)]
-                        + field.current[field.idx(x + 1, y)]
-                        + field.current[field.idx(x, y - 1)]
-                        + field.current[field.idx(x, y + 1)]
-                        - 4.0 * center;
+                let laplacian = field.current[field.idx(x - 1, y)]
+                    + field.current[field.idx(x + 1, y)]
+                    + field.current[field.idx(x, y - 1)]
+                    + field.current[field.idx(x, y + 1)]
+                    - 4.0 * center;
 
                 let c = grid.get(x, y).speed;
                 let coeff = (c * self.dt / self.dx).powi(2);
 
                 field.next[idx] =
-                    2.0 * field.current[idx]
-                        - field.previous[idx]
-                        + coeff * laplacian;
+                    2.0 * field.current[idx] - field.previous[idx] + coeff * laplacian;
             }
         }
 
@@ -60,10 +57,7 @@ impl Solver {
 
         for y in 0..h {
             for x in 0..w {
-                let d = x
-                    .min(w - 1 - x)
-                    .min(y)
-                    .min(h - 1 - y);
+                let d = x.min(w - 1 - x).min(y).min(h - 1 - y);
 
                 if d < border {
                     let k = d as f32 / border as f32;

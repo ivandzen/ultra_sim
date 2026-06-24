@@ -3,16 +3,18 @@ mod material;
 mod sensor;
 mod solver;
 mod source;
+mod vtk_export;
 mod wave;
 
-use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::path::Path;
 
 use grid::Grid;
 use material::Material;
 use sensor::Sensor;
 use solver::Solver;
 use source::Source;
+use vtk_export::{write_frames_pvd, write_sensors_vtp, write_source_vtp, write_vti_frame};
 use wave::WaveField;
 
 fn main() {
@@ -21,12 +23,7 @@ fn main() {
 
     let mut grid = Grid::new(width, height, Material::water());
 
-    grid.add_circle(
-        width / 2,
-        height / 2,
-        35,
-        Material::muscle(),
-    );
+    grid.add_circle(width / 2, height / 2, 35, Material::muscle());
 
     let mut field = WaveField::new(width, height);
 
@@ -41,8 +38,10 @@ fn main() {
     let solver = Solver::new(0.4, 1.0);
 
     let total_steps = 1500;
+    let run_dir = Path::new("output/run_001");
+    std::fs::create_dir_all(run_dir).unwrap();
 
-    std::fs::create_dir_all("frames").unwrap();
+    let mut saved_frames = Vec::new();
 
     for step in 0..total_steps {
         solver.step(&grid, &mut field, &source, step);
@@ -52,46 +51,26 @@ fn main() {
         }
 
         if step % 10 == 0 {
-            let path = format!("frames/frame_{:04}.pgm", step);
-            write_pgm(&path, &field.current, width, height).unwrap();
-            println!("saved {path}");
+            let file_name = format!("frame_{:04}.vti", step);
+            let path = run_dir.join(&file_name);
+            write_vti_frame(&path, &grid, &field).unwrap();
+            saved_frames.push((step, file_name));
+            println!("saved {}", path.display());
         }
     }
 
     for (i, sensor) in sensors.iter().enumerate() {
-        let path = format!("sensor_{i}.csv");
+        let path = run_dir.join(format!("sensor_{i}.csv"));
         write_sensor_csv(&path, &sensor.samples).unwrap();
     }
+
+    write_frames_pvd(&run_dir.join("frames.pvd"), &saved_frames).unwrap();
+    write_sensors_vtp(&run_dir.join("sensors.vtp"), &sensors).unwrap();
+    write_source_vtp(&run_dir.join("source.vtp"), &source).unwrap();
 }
 
-fn write_pgm(path: &str, data: &[f32], width: usize, height: usize) -> std::io::Result<()> {
-    let file = File::create(path)?;
-    let mut writer = BufWriter::new(file);
-
-    writeln!(writer, "P2")?;
-    writeln!(writer, "{} {}", width, height)?;
-    writeln!(writer, "255")?;
-
-    let max_abs = data
-        .iter()
-        .fold(0.0_f32, |m, v| m.max(v.abs()))
-        .max(1e-6);
-
-    for y in 0..height {
-        for x in 0..width {
-            let v = data[y * width + x];
-            let normalized = ((v / max_abs) * 0.5 + 0.5).clamp(0.0, 1.0);
-            let pixel = (normalized * 255.0) as u8;
-            write!(writer, "{} ", pixel)?;
-        }
-        writeln!(writer)?;
-    }
-
-    Ok(())
-}
-
-fn write_sensor_csv(path: &str, samples: &[f32]) -> std::io::Result<()> {
-    let file = File::create(path)?;
+fn write_sensor_csv(path: &Path, samples: &[f32]) -> std::io::Result<()> {
+    let file = std::fs::File::create(path)?;
     let mut writer = BufWriter::new(file);
 
     writeln!(writer, "step,value")?;
