@@ -13,7 +13,7 @@ impl Solver {
         Self {
             dt,
             dx,
-            damping_border: 24,
+            damping_border: 80,
         }
     }
 
@@ -34,7 +34,7 @@ impl Solver {
                         + field.current[field.idx(x, y + 1)]
                         - 4.0 * center;
 
-                let c = grid.get(x, y).c;
+                let c = grid.get(x, y).speed;
                 let coeff = (c * self.dt / self.dx).powi(2);
 
                 field.next[idx] =
@@ -56,24 +56,24 @@ impl Solver {
         let w = field.width;
         let h = field.height;
         let border = self.damping_border;
+        let absorb_strength = 0.025;
 
         for y in 0..h {
             for x in 0..w {
-                let dist_left = x;
-                let dist_right = w - 1 - x;
-                let dist_top = y;
-                let dist_bottom = h - 1 - y;
-
-                let d = dist_left
-                    .min(dist_right)
-                    .min(dist_top)
-                    .min(dist_bottom);
+                let d = x
+                    .min(w - 1 - x)
+                    .min(y)
+                    .min(h - 1 - y);
 
                 if d < border {
                     let k = d as f32 / border as f32;
-                    let damping = k * k;
+                    let edge_factor = 1.0 - k;
+                    let damping = (-absorb_strength * edge_factor * edge_factor).exp();
+
                     let idx = field.idx(x, y);
                     field.next[idx] *= damping;
+                    field.current[idx] *= damping;
+                    field.previous[idx] *= damping;
                 }
             }
         }

@@ -16,8 +16,8 @@ use source::Source;
 use wave::WaveField;
 
 fn main() {
-    let width = 256;
-    let height = 256;
+    let width = 1024;
+    let height = 1024;
 
     let mut grid = Grid::new(width, height, Material::water());
 
@@ -30,7 +30,7 @@ fn main() {
 
     let mut field = WaveField::new(width, height);
 
-    let source = Source::new(width / 2, 40);
+    let source = Source::new(width / 2, 300);
 
     let mut sensors = vec![
         Sensor::new(width / 2, height - 40),
@@ -40,7 +40,7 @@ fn main() {
 
     let solver = Solver::new(0.4, 1.0);
 
-    let total_steps = 800;
+    let total_steps = 1500;
 
     std::fs::create_dir_all("frames").unwrap();
 
