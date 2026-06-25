@@ -19,6 +19,8 @@ impl Solver {
     }
 
     pub fn step(&self, grid: &Grid, field: &mut WaveField, source: &Source, step_index: usize) {
+        // For visual stability with higher-order stencils near heterogeneous boundaries,
+        // keep c_max * dt / dx <= 0.45 when possible.
         debug_assert!(
             self.cfl_number(grid) <= 1.0 / 2.0_f32.sqrt(),
             "CFL condition violated: c_max * dt / dx must be <= 1/sqrt(2)"
@@ -38,8 +40,6 @@ impl Solver {
         let w = grid.width;
         let h = grid.height;
 
-        let dt_over_dx = self.dt / self.dx;
-
         if w >= 2 && h > 0 {
             for y in 0..h {
                 for x_face in 1..w {
@@ -51,11 +51,10 @@ impl Solver {
                         continue;
                     }
 
-                    let p_right = field.pressure[field.pressure_idx(x_face, y)];
-                    let p_left = field.pressure[field.pressure_idx(x_face - 1, y)];
+                    let dpdx = pressure_dx_at_vx_face(field, x_face, y, self.dx);
                     let idx = field.vx_idx(x_face, y);
 
-                    field.vx[idx] -= dt_over_dx / rho * (p_right - p_left);
+                    field.vx[idx] -= self.dt / rho * dpdx;
                 }
             }
         }
@@ -71,11 +70,10 @@ impl Solver {
                         continue;
                     }
 
-                    let p_down = field.pressure[field.pressure_idx(x, y_face)];
-                    let p_up = field.pressure[field.pressure_idx(x, y_face - 1)];
+                    let dpdy = pressure_dy_at_vy_face(field, x, y_face, self.dx);
                     let idx = field.vy_idx(x, y_face);
 
-                    field.vy[idx] -= dt_over_dx / rho * (p_down - p_up);
+                    field.vy[idx] -= self.dt / rho * dpdy;
                 }
             }
         }
@@ -94,32 +92,12 @@ impl Solver {
                 let material = grid.get(x, y);
                 let idx = field.pressure_idx(x, y);
 
-                let vx_right = if x + 1 < field.width + 1 {
-                    field.vx[field.vx_idx(x + 1, y)]
-                } else {
-                    0.0
-                };
-                let vx_left = if x > 0 {
-                    field.vx[field.vx_idx(x, y)]
-                } else {
-                    0.0
-                };
-                let vy_down = if y + 1 < field.height + 1 {
-                    field.vy[field.vy_idx(x, y + 1)]
-                } else {
-                    0.0
-                };
-                let vy_up = if y > 0 {
-                    field.vy[field.vy_idx(x, y)]
-                } else {
-                    0.0
-                };
-
-                let divergence = ((vx_right - vx_left) + (vy_down - vy_up)) / self.dx;
+                let dvx_dx = vx_dx_at_pressure_cell(field, x, y, self.dx);
+                let dvy_dy = vy_dy_at_pressure_cell(field, x, y, self.dx);
                 let attenuation = attenuation_factor(&material, self.dt);
 
                 field.pressure_next[idx] = (field.pressure[idx]
-                    - material.bulk_modulus() * self.dt * divergence)
+                    - material.bulk_modulus() * self.dt * (dvx_dx + dvy_dy))
                     * attenuation;
             }
         }
@@ -177,6 +155,66 @@ fn attenuation_factor(material: &Material, dt: f32) -> f32 {
     (-material.attenuation * dt).exp().clamp(0.0, 1.0)
 }
 
+fn staggered_diff_2(right: f32, left: f32, dx: f32) -> f32 {
+    (right - left) / dx
+}
+
+fn staggered_diff_4(f_plus_1: f32, f_0: f32, f_minus_1: f32, f_minus_2: f32, dx: f32) -> f32 {
+    ((9.0 / 8.0) * (f_0 - f_minus_1) - (1.0 / 24.0) * (f_plus_1 - f_minus_2)) / dx
+}
+
+fn pressure_dx_at_vx_face(field: &WaveField, x_face: usize, y: usize, dx: f32) -> f32 {
+    let right = field.pressure[field.pressure_idx(x_face, y)];
+    let left = field.pressure[field.pressure_idx(x_face - 1, y)];
+
+    if x_face >= 2 && x_face + 1 < field.width {
+        let plus_1 = field.pressure[field.pressure_idx(x_face + 1, y)];
+        let minus_2 = field.pressure[field.pressure_idx(x_face - 2, y)];
+        staggered_diff_4(plus_1, right, left, minus_2, dx)
+    } else {
+        staggered_diff_2(right, left, dx)
+    }
+}
+
+fn pressure_dy_at_vy_face(field: &WaveField, x: usize, y_face: usize, dx: f32) -> f32 {
+    let down = field.pressure[field.pressure_idx(x, y_face)];
+    let up = field.pressure[field.pressure_idx(x, y_face - 1)];
+
+    if y_face >= 2 && y_face + 1 < field.height {
+        let plus_1 = field.pressure[field.pressure_idx(x, y_face + 1)];
+        let minus_2 = field.pressure[field.pressure_idx(x, y_face - 2)];
+        staggered_diff_4(plus_1, down, up, minus_2, dx)
+    } else {
+        staggered_diff_2(down, up, dx)
+    }
+}
+
+fn vx_dx_at_pressure_cell(field: &WaveField, x: usize, y: usize, dx: f32) -> f32 {
+    let right = field.vx[field.vx_idx(x + 1, y)];
+    let left = field.vx[field.vx_idx(x, y)];
+
+    if x >= 1 && x + 2 <= field.width {
+        let plus_1 = field.vx[field.vx_idx(x + 2, y)];
+        let minus_2 = field.vx[field.vx_idx(x - 1, y)];
+        staggered_diff_4(plus_1, right, left, minus_2, dx)
+    } else {
+        staggered_diff_2(right, left, dx)
+    }
+}
+
+fn vy_dy_at_pressure_cell(field: &WaveField, x: usize, y: usize, dx: f32) -> f32 {
+    let down = field.vy[field.vy_idx(x, y + 1)];
+    let up = field.vy[field.vy_idx(x, y)];
+
+    if y >= 1 && y + 2 <= field.height {
+        let plus_1 = field.vy[field.vy_idx(x, y + 2)];
+        let minus_2 = field.vy[field.vy_idx(x, y - 1)];
+        staggered_diff_4(plus_1, down, up, minus_2, dx)
+    } else {
+        staggered_diff_2(down, up, dx)
+    }
+}
+
 fn apply_sponge(
     buffer: &mut [f32],
     width: usize,
@@ -232,6 +270,31 @@ mod tests {
         values.iter().map(|v| v.abs()).fold(0.0, f32::max)
     }
 
+    fn fill_pressure_pattern(field: &mut WaveField) {
+        for y in 0..field.height {
+            for x in 0..field.width {
+                let idx = field.pressure_idx(x, y);
+                field.pressure[idx] = (x as f32).powi(3) + 3.0 * (y as f32).powi(2);
+            }
+        }
+    }
+
+    fn fill_face_velocity_pattern(field: &mut WaveField) {
+        for y in 0..field.height {
+            for x in 0..(field.width + 1) {
+                let idx = field.vx_idx(x, y);
+                field.vx[idx] = (x as f32).powi(3) + 2.0 * y as f32;
+            }
+        }
+
+        for y in 0..(field.height + 1) {
+            for x in 0..field.width {
+                let idx = field.vy_idx(x, y);
+                field.vy[idx] = 2.0 * x as f32 + (y as f32).powi(3);
+            }
+        }
+    }
+
     #[test]
     fn homogeneous_water_remains_symmetric_and_stable() {
         let width = 64;
@@ -284,6 +347,59 @@ mod tests {
         assert!(field.vx.iter().all(|value| value.is_finite()));
         assert!(field.vy.iter().all(|value| value.is_finite()));
         assert!(max_abs(&field.pressure) > 0.0);
+    }
+
+    #[test]
+    fn fourth_order_stencils_are_used_in_the_bulk_region() {
+        let width = 6;
+        let height = 6;
+        let grid = Grid::new(width, height, Material::water());
+        let solver = Solver {
+            dt: 1.0,
+            dx: 1.0,
+            damping_border: 0,
+        };
+
+        let mut velocity_field = WaveField::new(width, height);
+        fill_pressure_pattern(&mut velocity_field);
+        solver.update_velocities(&grid, &mut velocity_field);
+
+        let x_face = 3;
+        let y = 2;
+        let expected_dpdx = staggered_diff_4(
+            velocity_field.pressure[velocity_field.pressure_idx(x_face + 1, y)],
+            velocity_field.pressure[velocity_field.pressure_idx(x_face, y)],
+            velocity_field.pressure[velocity_field.pressure_idx(x_face - 1, y)],
+            velocity_field.pressure[velocity_field.pressure_idx(x_face - 2, y)],
+            1.0,
+        );
+        let expected_vx = -expected_dpdx;
+        let vx_idx = velocity_field.vx_idx(x_face, y);
+        assert!((velocity_field.vx[vx_idx] - expected_vx).abs() < 1e-6);
+
+        let mut pressure_field = WaveField::new(width, height);
+        fill_face_velocity_pattern(&mut pressure_field);
+        solver.update_pressure(&grid, &mut pressure_field);
+
+        let x = 2;
+        let y = 2;
+        let expected_dvx_dx = staggered_diff_4(
+            pressure_field.vx[pressure_field.vx_idx(x + 2, y)],
+            pressure_field.vx[pressure_field.vx_idx(x + 1, y)],
+            pressure_field.vx[pressure_field.vx_idx(x, y)],
+            pressure_field.vx[pressure_field.vx_idx(x - 1, y)],
+            1.0,
+        );
+        let expected_dvy_dy = staggered_diff_4(
+            pressure_field.vy[pressure_field.vy_idx(x, y + 2)],
+            pressure_field.vy[pressure_field.vy_idx(x, y + 1)],
+            pressure_field.vy[pressure_field.vy_idx(x, y)],
+            pressure_field.vy[pressure_field.vy_idx(x, y - 1)],
+            1.0,
+        );
+        let expected_pressure = -(expected_dvx_dx + expected_dvy_dy);
+        let p_idx = pressure_field.pressure_idx(x, y);
+        assert!((pressure_field.pressure_next[p_idx] - expected_pressure).abs() < 1e-6);
     }
 
     #[test]
