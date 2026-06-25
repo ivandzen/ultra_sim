@@ -65,7 +65,7 @@ pub fn write_vti_frame(path: &Path, grid: &Grid, field: &WaveField) -> std::io::
             "grid and field dimensions do not match",
         ));
     }
-    if grid.cells.len() != field.current.len() {
+    if grid.cells.len() != field.pressure.len() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "grid and field sizes do not match",
@@ -90,7 +90,7 @@ pub fn write_vti_frame(path: &Path, grid: &Grid, field: &WaveField) -> std::io::
     )?;
     writeln!(writer, r#"      <PointData Scalars="pressure">"#)?;
 
-    write_ascii_data_array(&mut writer, "pressure", "Float32", 1, &field.current)?;
+    write_ascii_data_array(&mut writer, "pressure", "Float32", 1, &field.pressure)?;
 
     let speed: Vec<f32> = grid.cells.iter().map(|cell| cell.speed).collect();
     let density: Vec<f32> = grid.cells.iter().map(|cell| cell.density).collect();

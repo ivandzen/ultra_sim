@@ -23,7 +23,7 @@ fn main() {
 
     let mut grid = Grid::new(width, height, Material::water());
 
-    grid.add_circle(width / 2, height / 2, 35, Material::muscle());
+    grid.add_circle(width / 2, height / 2, 35, Material::bone());
 
     let mut field = WaveField::new(width, height);
 
@@ -35,7 +35,7 @@ fn main() {
         Sensor::new(width / 2 + 40, height - 50),
     ];
 
-    let solver = Solver::new(0.4, 1.0);
+    let solver = Solver::new(0.25, 1.0);
 
     let total_steps = 1500;
     let run_dir = Path::new("output/run_001");

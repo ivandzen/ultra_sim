@@ -16,7 +16,6 @@ impl Sensor {
     }
 
     pub fn record(&mut self, field: &WaveField) {
-        let idx = field.idx(self.x, self.y);
-        self.samples.push(field.current[idx]);
+        self.samples.push(field.pressure_at(self.x, self.y));
     }
 }

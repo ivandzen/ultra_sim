@@ -18,6 +18,14 @@ pub struct Material {
 
 #[allow(dead_code)]
 impl Material {
+    pub fn bulk_modulus(&self) -> f32 {
+        self.density * self.speed * self.speed
+    }
+
+    pub fn impedance(&self) -> f32 {
+        self.density * self.speed
+    }
+
     pub fn water() -> Self {
         Self {
             kind: MaterialKind::Water,
@@ -49,8 +57,8 @@ impl Material {
         Self {
             kind: MaterialKind::Bone,
             density: 1.85,
-            speed: 2.0,
-            attenuation: 0.05,
+            speed: 1.85,
+            attenuation: 0.2,
         }
     }
 
