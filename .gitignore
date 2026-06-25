@@ -1,5 +1,7 @@
 /target
 /frames
-/output/
+*output/
 /.idea
 sensor_*
+*.venv
+*__pycache__

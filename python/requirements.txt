@@ -1,0 +1,7 @@
+numpy>=2.0
+k-wave-python>=0.6.2
+h5py>=3.12
+matplotlib>=3.10
+vtk>=9.3
+tqdm>=4.67
+scipy>=1.15

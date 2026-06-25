@@ -57,7 +57,7 @@ impl Material {
         Self {
             kind: MaterialKind::Bone,
             density: 1.85,
-            speed: 1.85,
+            speed: 2.4,
             attenuation: 0.2,
         }
     }
