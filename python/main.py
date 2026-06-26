@@ -17,21 +17,49 @@ from kwave.utils.signals import tone_burst
 
 
 def export_pressure_timeseries_to_vti(
-    pressure_data,
-    width,
-    height,
-    sound_speed,
-    density,
-    alpha_coeff,
-    output_dir,
-    frame_step=10,
+        pressure_data,
+        width,
+        height,
+        sound_speed,
+        density,
+        alpha_coeff,
+        output_dir,
+        frame_step=10,
 ):
     os.makedirs(output_dir, exist_ok=True)
 
+    pressure_data = np.asarray(pressure_data)
+    num_points = width * height
+
+    print(f"pressure_data.shape = {pressure_data.shape}")
+
+    if pressure_data.ndim != 2:
+        raise ValueError(f"Expected 2D pressure_data, got shape {pressure_data.shape}")
+
+    if pressure_data.shape[0] == num_points:
+        # shape: (points, time)
+        num_time_steps = pressure_data.shape[1]
+
+        def get_frame(t):
+            return pressure_data[:, t]
+
+    elif pressure_data.shape[1] == num_points:
+        # shape: (time, points)
+        num_time_steps = pressure_data.shape[0]
+
+        def get_frame(t):
+            return pressure_data[t, :]
+
+    else:
+        raise ValueError(
+            f"Cannot interpret pressure_data shape {pressure_data.shape}; "
+            f"expected one axis to be width*height={num_points}"
+        )
+
     saved_frames = []
 
-    for t in range(0, pressure_data.shape[1], frame_step):
-        pressure = pressure_data[:, t].reshape((height, width))
+    for t in range(0, num_time_steps, frame_step):
+        pressure = get_frame(t).reshape((height, width))
 
         path = os.path.join(output_dir, f"frame_{t:04d}.vti")
         write_vti(
@@ -147,7 +175,7 @@ def main():
     )
 
     # Время симуляции
-    c_max = np.max(sound_speed)
+    c_max = float(np.max(sound_speed))
     cfl = 0.25
     dt = cfl * dx / c_max
     total_steps = 3500
@@ -174,8 +202,9 @@ def main():
         pml_inside=False,
         pml_size=[80, 80],
         data_cast="single",
+        save_to_disk=True,
     )
-    execution_options = SimulationExecutionOptions(backend="python")
+    execution_options = SimulationExecutionOptions(backend="CUDA")
 
     sensor_data = kspaceFirstOrder2D(
         kgrid=kgrid,
