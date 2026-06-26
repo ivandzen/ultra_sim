@@ -112,8 +112,8 @@ def write_pvd(path, frames):
 
 
 def main():
-    width = 1024
-    height = 1024
+    width = 512
+    height = 512
 
     dx = 1e-4  # 0.1 mm
     dy = dx
@@ -150,13 +150,13 @@ def main():
     c_max = np.max(sound_speed)
     cfl = 0.25
     dt = cfl * dx / c_max
-    total_steps = 500
+    total_steps = 3500
     kgrid.setTime(total_steps, dt)
 
     # Source
     source = kSource()
     source.p_mask = np.zeros((height, width), dtype=bool)
-    source_y = 300
+    source_y = 50
     source_x = width // 2
     source.p_mask[source_y, source_x] = True
 
