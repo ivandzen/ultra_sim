@@ -1,8 +1,8 @@
-import os
+import os.path
 from pathlib import Path
+
+import h5py
 import numpy as np
-import vtk
-from vtk.util.numpy_support import numpy_to_vtk
 
 from kwave.data import Vector
 from kwave.kgrid import kWaveGrid
@@ -16,130 +16,83 @@ from kwave.utils.signals import tone_burst
 from kwave.compat import options_to_kwargs
 
 
-def export_pressure_timeseries_to_vti(
-        pressure_data,
-        width,
-        height,
-        sound_speed,
-        density,
-        alpha_coeff,
-        output_dir,
+def write_kwave_xdmf(
+        input_h5="./kwave/kwave_output.h5",
+        output_xdmf="./kwave/kwave_output.xdmf",
+        width=None,
+        height=None,
+        dx=1e-4,
+        dy=1e-4,
         frame_step=10,
 ):
-    os.makedirs(output_dir, exist_ok=True)
+    input_h5 = Path(input_h5)
+    output_xdmf = Path(output_xdmf)
 
-    pressure_data = np.asarray(pressure_data)
-    num_points = width * height
+    with h5py.File(input_h5, "r") as f:
+        p = f["p"]
+        dt = float(f["dt"][0, 0, 0])
+        nt = int(p.shape[1])
+        num_points = int(p.shape[2])
 
-    print(f"pressure_data.shape = {pressure_data.shape}")
+    if width is None or height is None:
+        side = int(num_points ** 0.5)
+        if side * side != num_points:
+            raise ValueError(
+                f"Cannot infer square grid from {num_points} points; "
+                f"pass width/height explicitly"
+            )
+        width = side
+        height = side
 
-    if pressure_data.ndim != 2:
-        raise ValueError(f"Expected 2D pressure_data, got shape {pressure_data.shape}")
-
-    if pressure_data.shape[0] == num_points:
-        # shape: (points, time)
-        num_time_steps = pressure_data.shape[1]
-
-        def get_frame(t):
-            return pressure_data[:, t]
-
-    elif pressure_data.shape[1] == num_points:
-        # shape: (time, points)
-        num_time_steps = pressure_data.shape[0]
-
-        def get_frame(t):
-            return pressure_data[t, :]
-
-    else:
+    if width * height != num_points:
         raise ValueError(
-            f"Cannot interpret pressure_data shape {pressure_data.shape}; "
-            f"expected one axis to be width*height={num_points}"
+            f"width*height={width*height}, but /p has {num_points} points"
         )
 
-    saved_frames = []
+    h5_ref = input_h5.name
+    frame_indices = list(range(0, nt, frame_step))
 
-    for t in range(0, num_time_steps, frame_step):
-        pressure = get_frame(t).reshape((height, width))
+    with open(output_xdmf, "w") as x:
+        x.write('<?xml version="1.0" ?>\n')
+        x.write('<Xdmf Version="3.0">\n')
+        x.write('  <Domain>\n')
+        x.write('    <Grid Name="PressureTimeSeries" GridType="Collection" CollectionType="Temporal">\n')
 
-        path = os.path.join(output_dir, f"frame_{t:04d}.vti")
-        write_vti(
-            path=path,
-            pressure=pressure,
-            sound_speed=sound_speed,
-            density=density,
-            alpha_coeff=alpha_coeff,
-            width=width,
-            height=height,
-        )
+        for t in frame_indices:
+            time_value = t * dt
 
-        saved_frames.append((t, f"frame_{t:04d}.vti"))
+            x.write(f'      <Grid Name="Frame_{t}" GridType="Uniform">\n')
+            x.write(f'        <Time Value="{time_value}"/>\n')
+            x.write(f'        <Topology TopologyType="2DCoRectMesh" Dimensions="{height} {width}"/>\n')
+            x.write('        <Geometry GeometryType="ORIGIN_DXDY">\n')
+            x.write('          <DataItem Dimensions="2" Format="XML">0 0</DataItem>\n')
+            x.write(f'          <DataItem Dimensions="2" Format="XML">{dy} {dx}</DataItem>\n')
+            x.write('        </Geometry>\n')
+            x.write('        <Attribute Name="pressure" AttributeType="Scalar" Center="Node">\n')
+            x.write(f'          <DataItem ItemType="HyperSlab" Dimensions="{height} {width}" Type="HyperSlab">\n')
+            x.write('            <DataItem Dimensions="3 3" Format="XML">\n')
+            x.write(f'              0 {t} 0\n')
+            x.write('              1 1 1\n')
+            x.write(f'              1 1 {num_points}\n')
+            x.write('            </DataItem>\n')
+            x.write(
+                f'            <DataItem Dimensions="1 {nt} {num_points}" '
+                f'NumberType="Float" Precision="4" Format="HDF">'
+                f'{h5_ref}:/p</DataItem>\n'
+            )
+            x.write('          </DataItem>\n')
+            x.write('        </Attribute>\n')
+            x.write('      </Grid>\n')
 
-    write_pvd(os.path.join(output_dir, "frames.pvd"), saved_frames)
+        x.write('    </Grid>\n')
+        x.write('  </Domain>\n')
+        x.write('</Xdmf>\n')
 
-
-def write_vti(path, pressure, sound_speed, density, alpha_coeff, width, height):
-    image_data = vtk.vtkImageData()
-    image_data.SetDimensions(width, height, 1)
-    image_data.SetSpacing(1.0, 1.0, 1.0)
-    image_data.SetOrigin(0.0, 0.0, 0.0)
-
-    point_data = image_data.GetPointData()
-
-    def add_array(name, array, set_active=False):
-        contiguous = np.ascontiguousarray(array, dtype=np.float32)
-        vtk_array = numpy_to_vtk(contiguous.ravel(order="C"), deep=True)
-        vtk_array.SetName(name)
-        point_data.AddArray(vtk_array)
-        if set_active:
-            point_data.SetScalars(vtk_array)
-
-    # NumPy arrays are stored as (height, width), which matches VTK's x-fastest
-    # ordering when flattened in C order with dimensions set to (width, height, 1).
-    add_array("pressure", pressure, set_active=True)
-    add_array("sound_speed", sound_speed)
-    add_array("density", density)
-    add_array("alpha_coeff", alpha_coeff)
-
-    writer = vtk.vtkXMLImageDataWriter()
-    writer.SetFileName(path)
-    writer.SetInputData(image_data)
-    writer.SetDataModeToAscii()
-    writer.SetCompressorTypeToNone()
-
-    write_result = writer.Write()
-    has_nan = bool(np.isnan(pressure).any())
-    has_inf = bool(np.isinf(pressure).any())
-    finite = np.isfinite(pressure)
-    if finite.any():
-        pressure_min = float(pressure[finite].min())
-        pressure_max = float(pressure[finite].max())
-    else:
-        pressure_min = float("nan")
-        pressure_max = float("nan")
-
-    print(
-        f"{path} write={write_result} pressure_min={pressure_min} "
-        f"pressure_max={pressure_max} has_nan={has_nan} has_inf={has_inf}"
-    )
-
-    if write_result != 1:
-        raise IOError(f"Failed to write VTI file: {path}")
+    print(f"Wrote {output_xdmf}")
 
 
-def write_pvd(path, frames):
-    with open(path, "w") as f:
-        f.write('<?xml version="1.0"?>\n')
-        f.write('<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">\n')
-        f.write("  <Collection>\n")
-
-        for timestep, filename in frames:
-            f.write(f'    <DataSet timestep="{timestep}" group="" part="0" file="{filename}"/>\n')
-
-        f.write("  </Collection>\n")
-        f.write("</VTKFile>\n")
-
-
-def main():
+def main(run_name: str):
+    save_path = os.path.join("runs", run_name)
     width = 512
     height = 512
 
@@ -203,7 +156,7 @@ def main():
         pml_size=[80, 80],
         data_cast="single",
         save_to_disk=True,
-        data_path="./kwave/",
+        data_path=save_path,
     )
 
     sensor_data = kspaceFirstOrder(
@@ -216,22 +169,12 @@ def main():
         device="gpu",
     )
 
-    if isinstance(sensor_data, dict):
-        pressure_data = sensor_data["p"]
-    else:
-        pressure_data = sensor_data.p
-
-    export_pressure_timeseries_to_vti(
-        pressure_data=pressure_data,
-        width=width,
-        height=height,
-        sound_speed=sound_speed,
-        density=density,
-        alpha_coeff=alpha_coeff,
-        output_dir="output/run_001",
+    write_kwave_xdmf(
+        input_h5=os.path.join(save_path, "kwave_output.h5"),
+        output_xdmf=os.path.join(save_path, "kwave_output.xdmf"),
         frame_step=10,
     )
 
 
 if __name__ == "__main__":
-    main()
+    main("run001")

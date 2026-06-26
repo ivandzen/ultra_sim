@@ -6,3 +6,4 @@ sensor_*
 *.venv
 *__pycache__
 kwave/*
+*runs/
