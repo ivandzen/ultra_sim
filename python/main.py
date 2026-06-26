@@ -10,7 +10,6 @@ from kwave.kmedium import kWaveMedium
 from kwave.ksource import kSource
 from kwave.ksensor import kSensor
 from kwave.kspaceFirstOrder import kspaceFirstOrder
-from kwave.options.simulation_execution_options import SimulationExecutionOptions
 from kwave.options.simulation_options import SimulationOptions
 from kwave.utils.mapgen import make_disc
 from kwave.utils.signals import tone_burst
@@ -204,6 +203,7 @@ def main():
         pml_size=[80, 80],
         data_cast="single",
         save_to_disk=True,
+        data_path="./kwave/",
     )
 
     sensor_data = kspaceFirstOrder(
