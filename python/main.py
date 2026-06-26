@@ -1,5 +1,5 @@
 import os
-
+from pathlib import Path
 import numpy as np
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
@@ -9,11 +9,12 @@ from kwave.kgrid import kWaveGrid
 from kwave.kmedium import kWaveMedium
 from kwave.ksource import kSource
 from kwave.ksensor import kSensor
-from kwave.kspaceFirstOrder2D import kspaceFirstOrder2D
+from kwave.kspaceFirstOrder import kspaceFirstOrder
 from kwave.options.simulation_execution_options import SimulationExecutionOptions
 from kwave.options.simulation_options import SimulationOptions
 from kwave.utils.mapgen import make_disc
 from kwave.utils.signals import tone_burst
+from kwave.compat import options_to_kwargs
 
 
 def export_pressure_timeseries_to_vti(
@@ -204,15 +205,15 @@ def main():
         data_cast="single",
         save_to_disk=True,
     )
-    execution_options = SimulationExecutionOptions(backend="CUDA")
 
-    sensor_data = kspaceFirstOrder2D(
+    sensor_data = kspaceFirstOrder(
         kgrid=kgrid,
         source=source,
         sensor=sensor,
         medium=medium,
-        simulation_options=simulation_options,
-        execution_options=execution_options,
+        **options_to_kwargs(simulation_options),
+        backend="cpp",
+        device="gpu",
     )
 
     if isinstance(sensor_data, dict):
